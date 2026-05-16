@@ -1,0 +1,967 @@
+AWS INTERNAL 1 - COMPLETE UI STEPS FOR ALL EXPERIMENTS
+
+Use this file if you need to perform the experiments manually from the AWS Console UI.
+
+Recommended region for demos:
+ap-south-1, Mumbai
+
+Important:
+- Delete resources after demo to avoid charges.
+- NAT Gateway is not covered by Free Tier.
+- Use small instance types like t2.micro or t3.micro when possible.
+- Use unique S3 bucket names because S3 bucket names are globally unique.
+- If your account blocks public S3 access at account level, public object/static website demos may show 403 Forbidden until account-level block public access is disabled.
+
+
+============================================================
+EXPERIMENT 1: EBS VOLUME, INSTANCE SCALING, SNAPSHOT RESTORE
+============================================================
+
+Objective:
+Create and attach an EBS volume to EC2, permanently mount it on Linux, increase CPU/RAM by changing instance type, create snapshot, copy snapshot to another region, and restore it there.
+
+
+PART A: CREATE EC2 INSTANCE
+
+1. Open AWS Console.
+2. Search for EC2.
+3. Go to Instances.
+4. Click Launch instances.
+5. Enter name:
+   Week2-EBS-Instance
+6. Choose AMI:
+   Amazon Linux 2023
+7. Choose instance type:
+   t3.micro or t2.micro
+8. Choose or create key pair.
+9. Network settings:
+   Use default VPC.
+   Select a subnet.
+   Enable Auto-assign public IP.
+10. Security group:
+   Allow SSH 22 from your IP.
+11. Click Launch instance.
+12. Wait until instance state is Running.
+13. Note the Availability Zone, for example:
+   ap-south-1a
+
+
+PART B: CREATE AND ATTACH EBS VOLUME
+
+1. Go to EC2 -> Elastic Block Store -> Volumes.
+2. Click Create volume.
+3. Select:
+   Volume type: gp3
+   Size: 20 GiB
+   Availability Zone: same as EC2 instance, for example ap-south-1a
+4. Click Create volume.
+5. Select the new volume.
+6. Click Actions -> Attach volume.
+7. Choose your EC2 instance.
+8. Device name:
+   /dev/xvdf or /dev/sdf
+9. Click Attach volume.
+10. Confirm volume state becomes In-use.
+
+
+PART C: MOUNT EBS VOLUME ON LINUX
+
+1. Go to EC2 -> Instances.
+2. Select your instance.
+3. Click Connect.
+4. Use EC2 Instance Connect or SSH.
+5. Run:
+
+   lsblk
+
+6. Identify the new disk.
+   On Nitro instances it usually appears as:
+   /dev/nvme1n1
+
+7. Create partition:
+
+   sudo fdisk /dev/nvme1n1
+
+8. Inside fdisk press:
+
+   n
+   p
+   Enter
+   Enter
+   Enter
+   w
+
+9. Inform kernel:
+
+   sudo partprobe
+
+10. Verify partition:
+
+   lsblk
+
+11. Format partition:
+
+   sudo mkfs.xfs /dev/nvme1n1p1
+
+12. Create mount directory:
+
+   sudo mkdir /mnt/divyansh
+
+13. Mount volume:
+
+   sudo mount /dev/nvme1n1p1 /mnt/divyansh
+
+14. Verify:
+
+   df -h
+
+15. Create test file:
+
+   cd /mnt/divyansh
+   sudo touch f1
+   ls
+
+
+PART D: MAKE MOUNT PERMANENT
+
+1. Get UUID:
+
+   sudo blkid /dev/nvme1n1p1
+
+2. Copy the UUID value.
+3. Edit fstab:
+
+   sudo nano /etc/fstab
+
+4. Add this line at the bottom:
+
+   UUID=PASTE-UUID-HERE /mnt/divyansh xfs defaults,nofail 0 0
+
+5. Save file.
+6. Test fstab:
+
+   sudo mount -a
+
+7. Reboot:
+
+   sudo reboot
+
+8. Reconnect and verify:
+
+   df -h
+   ls /mnt/divyansh
+
+9. If file f1 is visible, permanent mounting is successful.
+
+
+PART E: CHANGE INSTANCE TYPE TO INCREASE CPU AND RAM
+
+1. Go to EC2 -> Instances.
+2. Select the instance.
+3. Click Instance state -> Stop instance.
+4. Wait until state becomes Stopped.
+5. Click Actions -> Instance settings -> Change instance type.
+6. Change from:
+   t3.micro
+   to:
+   t3.small or t3.medium
+7. Click Apply.
+8. Click Instance state -> Start instance.
+9. Show the new instance type in the Details tab.
+
+Important explanation:
+Changing instance type changes CPU and RAM.
+Changing EBS volume changes storage, not CPU/RAM.
+
+
+PART F: CREATE SNAPSHOT AND COPY TO ANOTHER REGION
+
+1. Go to EC2 -> Volumes.
+2. Select the attached EBS volume.
+3. Click Actions -> Create snapshot.
+4. Enter description:
+   Week2 EBS snapshot
+5. Click Create snapshot.
+6. Go to EC2 -> Snapshots.
+7. Wait until status becomes Completed.
+8. Select the snapshot.
+9. Click Actions -> Copy snapshot.
+10. Select destination region, for example:
+    us-east-1
+11. Click Copy snapshot.
+12. Switch AWS Console region to us-east-1.
+13. Go to EC2 -> Snapshots.
+14. Wait until copied snapshot becomes Completed.
+
+
+PART G: CREATE VOLUME FROM SNAPSHOT IN DESTINATION REGION
+
+1. In destination region, go to EC2 -> Snapshots.
+2. Select copied snapshot.
+3. Click Actions -> Create volume from snapshot.
+4. Choose volume type:
+   gp3
+5. Choose Availability Zone same as destination EC2.
+6. Click Create volume.
+7. Create or use an EC2 instance in the destination region.
+8. Go to Volumes.
+9. Select new volume.
+10. Click Actions -> Attach volume.
+11. Choose destination EC2 instance.
+12. Device name:
+    /dev/sdf
+13. Click Attach.
+14. Connect to destination EC2 and run:
+
+    lsblk
+    sudo mkdir /mnt/divyansh
+    sudo mount /dev/nvme1n1p1 /mnt/divyansh
+    ls /mnt/divyansh
+
+15. If file f1 appears, snapshot restore is successful.
+
+
+============================================================
+EXPERIMENT 2: EFS SHARED FILE STORAGE
+============================================================
+
+Objective:
+Create EFS and mount it on two EC2 instances so both can share the same files.
+
+
+PART A: CREATE TWO EC2 INSTANCES
+
+1. Open EC2 -> Instances.
+2. Click Launch instances.
+3. Instance name:
+   EFS-1
+4. AMI:
+   Amazon Linux 2023 or Amazon Linux 2
+5. Instance type:
+   t3.micro or t2.micro
+6. Key pair:
+   Choose existing key pair or create one.
+7. Network:
+   Default VPC.
+8. Subnet:
+   Choose one subnet, for example ap-south-1a.
+9. Security group:
+   Allow SSH 22 from your IP.
+10. Launch instance.
+11. Repeat same steps for second instance:
+    Name: EFS-2
+    Subnet: choose different AZ if possible, for example ap-south-1b.
+
+
+PART B: CREATE SECURITY GROUP FOR EFS
+
+1. Go to EC2 -> Security Groups.
+2. Click Create security group.
+3. Name:
+   EFS-NFS-SG
+4. VPC:
+   Same VPC as EC2 instances.
+5. Inbound rule:
+   Type: NFS
+   Port: 2049
+   Source: EC2 instances' security group
+6. Click Create security group.
+
+Note:
+For lab only, some people allow NFS from anywhere, but best practice is to allow NFS only from EC2 security group.
+
+
+PART C: CREATE EFS FILE SYSTEM
+
+1. Search for EFS.
+2. Click Create file system.
+3. Name:
+   Week3-EFS
+4. VPC:
+   Same VPC as EC2 instances.
+5. Click Customize if available.
+6. Keep:
+   Regional
+   General Purpose
+   Bursting
+7. In Network settings:
+   Create mount targets in the AZs where EC2 instances exist.
+8. For each mount target, choose EFS-NFS-SG security group.
+9. Click Create.
+10. Wait until EFS is Available.
+
+
+PART D: INSTALL EFS UTILITIES ON BOTH INSTANCES
+
+Connect to EFS-1:
+
+1. EC2 -> Instances -> Select EFS-1.
+2. Click Connect.
+3. Run:
+
+   sudo su
+   yum install -y amazon-efs-utils
+   mkdir /efs
+
+Connect to EFS-2 and run the same:
+
+   sudo su
+   yum install -y amazon-efs-utils
+   mkdir /efs
+
+
+PART E: MOUNT EFS ON BOTH INSTANCES
+
+1. Go to EFS -> File systems.
+2. Open your EFS.
+3. Click Attach.
+4. Choose Mount via DNS.
+5. Copy the mount command.
+6. It will look like:
+
+   sudo mount -t efs -o tls fs-xxxxxxxx:/ /efs
+
+7. Run the mount command on EFS-1.
+8. Run the same mount command on EFS-2.
+9. Verify on both:
+
+   df -hT
+
+
+PART F: TEST SHARED STORAGE
+
+On EFS-1:
+
+   cd /efs
+   echo "created from EFS-1" > file-from-efs1.txt
+   ls
+
+On EFS-2:
+
+   cd /efs
+   ls
+   cat file-from-efs1.txt
+
+On EFS-2:
+
+   echo "created from EFS-2" > file-from-efs2.txt
+
+On EFS-1:
+
+   ls
+
+If files created from both instances are visible, EFS is working.
+
+
+============================================================
+EXPERIMENT 3: S3 PUBLIC ACCESS, VERSIONING, CRR, STATIC WEBSITE
+============================================================
+
+Objective:
+Create S3 buckets, upload public object, enable versioning, configure cross-region replication, and host a static website.
+
+
+PART A: CREATE PUBLIC S3 BUCKET AND UPLOAD OBJECT
+
+1. Search for S3.
+2. Click Create bucket.
+3. Bucket name:
+   my-public-bucket-yourname-12345
+4. Region:
+   ap-south-1
+5. Under Object Ownership:
+   Enable ACLs if available.
+   Choose Bucket owner preferred.
+6. Under Block Public Access:
+   Uncheck Block all public access.
+7. Tick acknowledge warning.
+8. Click Create bucket.
+9. Open the bucket.
+10. Go to Permissions tab.
+11. Confirm Block public access is Off.
+12. Scroll to Access Control List.
+13. Edit ACL.
+14. Under Everyone/Public access, allow Read if allowed.
+15. Save changes.
+16. Go to Objects tab.
+17. Click Upload.
+18. Upload a small file, for example public-object.txt.
+19. Open the object.
+20. Go to Permissions.
+21. Edit object ACL.
+22. Allow Everyone/Public Read.
+23. Save.
+24. Copy Object URL.
+25. Open in incognito browser.
+
+Expected output:
+Object opens without AWS login.
+
+
+PART B: ENABLE VERSIONING
+
+1. Create or open a bucket.
+2. Go to Properties tab.
+3. Scroll to Bucket Versioning.
+4. Click Edit.
+5. Select Enable.
+6. Click Save changes.
+7. Upload file:
+   report.txt
+8. Upload another file with same name:
+   report.txt
+9. Go to Objects.
+10. Enable Show versions.
+11. You should see two versions of report.txt.
+12. Delete report.txt.
+13. With Show versions enabled, you will see a delete marker.
+
+Expected output:
+Old versions are preserved even after overwrite/delete.
+
+
+PART C: CROSS-REGION REPLICATION
+
+1. Create source bucket in ap-south-1.
+2. Enable Versioning on source bucket.
+3. Create destination bucket in another region, for example us-east-1.
+4. Enable Versioning on destination bucket.
+5. Open source bucket.
+6. Go to Management tab.
+7. Scroll to Replication rules.
+8. Click Create replication rule.
+9. Rule name:
+   week4-crr-rule
+10. Status:
+    Enabled
+11. Scope:
+    Apply to all objects in the bucket.
+12. Destination:
+    Choose a bucket in another account or this account.
+13. Select destination bucket.
+14. IAM role:
+    Choose Create new role or let AWS create/manage role if option appears.
+15. Replication options:
+    Replicate new objects.
+16. Save rule.
+17. Upload a new file to source bucket:
+    replication-test.txt
+18. Wait a few minutes.
+19. Switch to destination bucket region.
+20. Open destination bucket.
+21. Confirm replication-test.txt appears.
+
+Expected output:
+New objects uploaded after rule creation replicate to destination bucket.
+
+Important:
+Existing objects do not replicate automatically unless you use S3 Batch Replication.
+
+
+PART D: STATIC WEBSITE HOSTING
+
+1. Create an S3 bucket:
+   my-static-site-yourname-12345
+2. Region:
+   ap-south-1
+3. Enable ACLs if available.
+4. Disable Block all public access.
+5. Acknowledge warning.
+6. Create bucket.
+7. Create index.html locally with content:
+
+   <h1>Welcome to my S3 website</h1>
+
+8. Create error.html locally with content:
+
+   <h1>Error page</h1>
+
+9. Upload index.html and error.html to the bucket.
+10. Set both objects public using ACL, or use a bucket policy.
+11. Go to Properties tab.
+12. Scroll to Static website hosting.
+13. Click Edit.
+14. Enable static website hosting.
+15. Choose Host a static website.
+16. Index document:
+    index.html
+17. Error document:
+    error.html
+18. Save changes.
+19. Copy Bucket website endpoint.
+20. Open endpoint in browser.
+21. Test invalid page:
+    endpoint/invalid.html
+
+Expected output:
+index.html loads on root URL.
+error.html loads for invalid path.
+
+
+============================================================
+EXPERIMENT 4: VPC CREATION AND EC2 INSTANCE CONNECTION
+============================================================
+
+Objective:
+Create custom VPC with public and private subnet, configure IGW, route tables, security groups, launch EC2 instances, and test public/private access.
+
+
+PART A: CREATE VPC
+
+1. Search for VPC.
+2. Go to Your VPCs.
+3. Click Create VPC.
+4. Choose VPC only.
+5. Name:
+   Custom-VPC
+6. IPv4 CIDR:
+   10.0.0.0/16
+7. Click Create VPC.
+8. Select VPC.
+9. Actions -> Edit VPC settings.
+10. Enable DNS resolution and DNS hostnames.
+
+
+PART B: CREATE SUBNETS
+
+Public subnet:
+
+1. Go to Subnets.
+2. Click Create subnet.
+3. Select Custom-VPC.
+4. Subnet name:
+   Public-Subnet
+5. Availability Zone:
+   ap-south-1a
+6. IPv4 CIDR:
+   10.0.1.0/24
+7. Click Create subnet.
+
+Private subnet:
+
+1. Click Create subnet.
+2. Select Custom-VPC.
+3. Subnet name:
+   Private-Subnet
+4. Availability Zone:
+   ap-south-1a
+5. IPv4 CIDR:
+   10.0.2.0/24
+6. Click Create subnet.
+
+
+PART C: ENABLE AUTO-ASSIGN PUBLIC IP ON PUBLIC SUBNET
+
+1. Select Public-Subnet.
+2. Actions -> Edit subnet settings.
+3. Enable Auto-assign public IPv4 address.
+4. Save.
+
+
+PART D: CREATE INTERNET GATEWAY
+
+1. Go to Internet Gateways.
+2. Click Create internet gateway.
+3. Name:
+   Custom-IGW
+4. Click Create.
+5. Select the IGW.
+6. Actions -> Attach to VPC.
+7. Select Custom-VPC.
+8. Attach.
+
+
+PART E: CREATE PUBLIC ROUTE TABLE
+
+1. Go to Route Tables.
+2. Click Create route table.
+3. Name:
+   Public-Route-Table
+4. VPC:
+   Custom-VPC
+5. Create.
+6. Select Public-Route-Table.
+7. Go to Routes tab.
+8. Click Edit routes.
+9. Add route:
+   Destination: 0.0.0.0/0
+   Target: Custom-IGW
+10. Save.
+11. Go to Subnet associations.
+12. Edit subnet associations.
+13. Select Public-Subnet.
+14. Save.
+
+
+PART F: CREATE NAT GATEWAY FOR PRIVATE SUBNET
+
+1. Go to NAT Gateways.
+2. Click Create NAT gateway.
+3. Name:
+   Custom-NAT
+4. Subnet:
+   Public-Subnet
+5. Connectivity type:
+   Public
+6. Elastic IP allocation:
+   Click Allocate Elastic IP.
+7. Click Create NAT gateway.
+8. Wait until status becomes Available.
+
+
+PART G: CREATE PRIVATE ROUTE TABLE
+
+1. Go to Route Tables.
+2. Click Create route table.
+3. Name:
+   Private-Route-Table
+4. VPC:
+   Custom-VPC
+5. Create.
+6. Select Private-Route-Table.
+7. Go to Routes tab.
+8. Click Edit routes.
+9. Add route:
+   Destination: 0.0.0.0/0
+   Target: NAT Gateway
+10. Save.
+11. Go to Subnet associations.
+12. Edit subnet associations.
+13. Select Private-Subnet.
+14. Save.
+
+
+PART H: CREATE SECURITY GROUPS
+
+Public EC2 security group:
+
+1. Go to EC2 -> Security Groups.
+2. Click Create security group.
+3. Name:
+   Public-EC2-SG
+4. VPC:
+   Custom-VPC
+5. Inbound rules:
+   SSH 22 from your IP
+   HTTP 80 from 0.0.0.0/0
+   HTTPS 443 from 0.0.0.0/0
+6. Create.
+
+Private EC2 security group:
+
+1. Click Create security group.
+2. Name:
+   Private-EC2-SG
+3. VPC:
+   Custom-VPC
+4. Inbound rules:
+   SSH 22 from Public-EC2-SG
+   ICMP from Public-EC2-SG
+5. Create.
+
+
+PART I: LAUNCH EC2 INSTANCES
+
+Public EC2:
+
+1. Go to EC2 -> Instances.
+2. Click Launch instances.
+3. Name:
+   Public-EC2
+4. AMI:
+   Amazon Linux 2023
+5. Instance type:
+   t3.micro
+6. Network:
+   Custom-VPC
+7. Subnet:
+   Public-Subnet
+8. Auto-assign public IP:
+   Enabled
+9. Security group:
+   Public-EC2-SG
+10. Launch.
+
+Private EC2:
+
+1. Launch another instance.
+2. Name:
+   Private-EC2
+3. AMI:
+   Amazon Linux 2023
+4. Instance type:
+   t3.micro
+5. Network:
+   Custom-VPC
+6. Subnet:
+   Private-Subnet
+7. Auto-assign public IP:
+   Disabled
+8. Security group:
+   Private-EC2-SG
+9. Launch.
+
+
+PART J: TEST
+
+1. Public EC2 should have public IP.
+2. Private EC2 should not have public IP.
+3. Public EC2 should be reachable through SSH.
+4. Private EC2 should not be directly reachable from internet.
+5. Private EC2 should have outbound internet through NAT Gateway.
+
+
+============================================================
+EXPERIMENT 5: VPC USING BASTION SERVER AND NAT GATEWAY
+============================================================
+
+Objective:
+Create a public bastion server and a private database server. SSH into private server only through bastion. Use NAT Gateway for private server internet access.
+
+
+PART A: CREATE VPC
+
+1. Go to VPC -> Your VPCs.
+2. Click Create VPC.
+3. Choose VPC only.
+4. Name:
+   Bastion-NAT-VPC
+5. IPv4 CIDR:
+   10.0.0.0/16
+6. Create VPC.
+7. Enable DNS resolution and DNS hostnames.
+
+
+PART B: CREATE SUBNETS
+
+Public subnet:
+
+1. Go to Subnets -> Create subnet.
+2. VPC:
+   Bastion-NAT-VPC
+3. Name:
+   Public-Bastion-Subnet
+4. AZ:
+   ap-south-1a
+5. CIDR:
+   10.0.1.0/24
+6. Create.
+7. Enable auto-assign public IPv4.
+
+Private subnet:
+
+1. Create subnet.
+2. VPC:
+   Bastion-NAT-VPC
+3. Name:
+   Private-DB-Subnet
+4. AZ:
+   ap-south-1a
+5. CIDR:
+   10.0.2.0/24
+6. Create.
+
+
+PART C: CREATE INTERNET GATEWAY
+
+1. Go to Internet Gateways.
+2. Create internet gateway:
+   Bastion-NAT-IGW
+3. Attach it to Bastion-NAT-VPC.
+
+
+PART D: CREATE PUBLIC ROUTE TABLE
+
+1. Go to Route Tables.
+2. Create route table:
+   Public-Bastion-RT
+3. VPC:
+   Bastion-NAT-VPC
+4. Add route:
+   Destination: 0.0.0.0/0
+   Target: Internet Gateway
+5. Associate with Public-Bastion-Subnet.
+
+
+PART E: CREATE NAT GATEWAY
+
+1. Go to NAT Gateways.
+2. Click Create NAT gateway.
+3. Name:
+   Bastion-NAT-Gateway
+4. Subnet:
+   Public-Bastion-Subnet
+5. Connectivity:
+   Public
+6. Allocate Elastic IP.
+7. Create NAT gateway.
+8. Wait until status becomes Available.
+
+
+PART F: CREATE PRIVATE ROUTE TABLE
+
+1. Go to Route Tables.
+2. Create route table:
+   Private-DB-RT
+3. VPC:
+   Bastion-NAT-VPC
+4. Add route:
+   Destination: 0.0.0.0/0
+   Target: NAT Gateway
+5. Associate with Private-DB-Subnet.
+
+
+PART G: CREATE KEY PAIRS
+
+1. Go to EC2 -> Key Pairs.
+2. Create key pair:
+   bastion
+3. Download:
+   bastion.pem
+4. Create another key pair:
+   dbserver
+5. Download:
+   dbserver.pem
+
+
+PART H: CREATE SECURITY GROUPS
+
+Bastion security group:
+
+1. EC2 -> Security Groups -> Create security group.
+2. Name:
+   Bastion-SG
+3. VPC:
+   Bastion-NAT-VPC
+4. Inbound rule:
+   SSH 22 from your IP only.
+5. Create.
+
+Database security group:
+
+1. Create security group.
+2. Name:
+   DB-Server-SG
+3. VPC:
+   Bastion-NAT-VPC
+4. Inbound rules:
+   SSH 22 from Bastion private IP or Bastion-SG
+   MySQL/Aurora 3306 from 10.0.1.0/24
+5. No public access.
+6. Create.
+
+
+PART I: LAUNCH BASTION SERVER
+
+1. EC2 -> Launch instances.
+2. Name:
+   Bastion-Server
+3. AMI:
+   Ubuntu Server 22.04 LTS
+4. Instance type:
+   t3.micro
+5. Key pair:
+   bastion
+6. Network:
+   Bastion-NAT-VPC
+7. Subnet:
+   Public-Bastion-Subnet
+8. Auto-assign public IP:
+   Enabled
+9. Security group:
+   Bastion-SG
+10. Launch.
+11. Note public IP and private IP.
+
+
+PART J: LAUNCH PRIVATE DATABASE SERVER
+
+1. Launch instance.
+2. Name:
+   Database-Server
+3. AMI:
+   Ubuntu Server 22.04 LTS
+4. Instance type:
+   t3.micro
+5. Key pair:
+   dbserver
+6. Network:
+   Bastion-NAT-VPC
+7. Subnet:
+   Private-DB-Subnet
+8. Auto-assign public IP:
+   Disabled
+9. Security group:
+   DB-Server-SG
+10. Launch.
+11. Note private IP, for example:
+    10.0.2.x
+
+
+PART K: COPY DB KEY TO BASTION
+
+From your local terminal or CloudShell where both pem files exist:
+
+   scp -i bastion.pem dbserver.pem ubuntu@BASTION_PUBLIC_IP:/home/ubuntu/
+
+
+PART L: SSH TO BASTION
+
+   ssh -i bastion.pem ubuntu@BASTION_PUBLIC_IP
+
+Inside bastion:
+
+   ls
+   chmod 400 dbserver.pem
+
+
+PART M: SSH FROM BASTION TO PRIVATE DB SERVER
+
+Inside bastion:
+
+   ssh -i dbserver.pem ubuntu@DB_PRIVATE_IP
+
+Example:
+
+   ssh -i dbserver.pem ubuntu@10.0.2.10
+
+If connection works, bastion setup is successful.
+
+
+PART N: TEST NAT GATEWAY FROM PRIVATE SERVER
+
+Inside private DB server:
+
+   sudo apt update
+
+If apt update works, NAT Gateway is working.
+
+Important explanation:
+- Bastion server provides secure SSH access to private instances.
+- NAT Gateway provides outbound internet for private instances.
+- Bastion does not replace NAT Gateway.
+- Database server has no public IP and cannot be accessed directly from the internet.
+
+
+============================================================
+CLEANUP CHECKLIST
+============================================================
+
+After lab demo, delete resources:
+
+1. Terminate EC2 instances.
+2. Delete NAT Gateways.
+3. Release Elastic IPs.
+4. Delete EBS volumes and snapshots.
+5. Delete EFS mount targets and EFS file systems.
+6. Empty and delete S3 buckets.
+7. Delete custom route tables.
+8. Detach and delete Internet Gateways.
+9. Delete subnets.
+10. Delete security groups.
+11. Delete custom VPCs.
+12. Delete unused key pairs.
+
+Most important cost warning:
+NAT Gateway creates charges while it exists. Delete it immediately after demo.
+
